@@ -1,5 +1,6 @@
 import json
 import getopt, sys
+from datetime import datetime
 
 
 class inputString:
@@ -11,16 +12,19 @@ class inputString:
 
     def is_false(self):
         return self.string == 'n'
+
     def is_valid_query(self):
         return self.string == 'n'
 
 
 class WebisCorpus:
 
-    def __init__(self, path, skip_existing=False, num_of_queries=None):
+    def __init__(self, path, skip_existing=False, num_of_queries=None,
+                 output_file_name=None):
         self.skip_existing = skip_existing
         self.num_of_queries = num_of_queries
         self.data_list = None
+        self.output_file_name = output_file_name
         with open(path) as corpusFile:
             self.data_list = json.loads(corpusFile.read())
 
@@ -34,13 +38,14 @@ class WebisCorpus:
                 counter += 1
 
     def write_corpus_to_file(self):
-        with open('new_edited_corpus.json', 'w') as outputCorpusFile:
+        with open(self.output_file_name, 'w') as outputCorpusFile:
             outputCorpusFile.write(json.dumps(self.data_list))
 
 
 def main(arguments):
     skip_existing = False
     num_of_queries = None
+    output_file = 'edited-webis-' + str(datetime.now()) + '.json'
 
     for current_argument, current_value in arguments:
         if current_argument in ("-h", "--help"):
@@ -57,7 +62,7 @@ def main(arguments):
             print("Program will stop after you've entered (%s) queries" % current_value)
             num_of_queries = int(current_value)
 
-    webis_corpus = WebisCorpus('corpus-webis-kiqc-13.json', skip_existing, num_of_queries)
+    webis_corpus = WebisCorpus('corpus-webis-kiqc-13.json', skip_existing, num_of_queries, output_file)
     for i, item in enumerate(webis_corpus.corpus_gen()):
         if i > 0:
             user_continues = inputString(input('Go to next query?(y/n)')).is_true()

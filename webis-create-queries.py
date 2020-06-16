@@ -19,8 +19,8 @@ class inputString:
 
 class WebisCorpus:
 
-    def __init__(self, path, skip_existing=False, num_of_queries=None,
-                 output_file_name=None):
+    def __init__(self, path, skip_existing, num_of_queries,
+                 output_file_name):
         self.skip_existing = skip_existing
         self.num_of_queries = num_of_queries
         self.data_list = None
@@ -33,9 +33,10 @@ class WebisCorpus:
         for item in self.data_list:
             if counter == self.num_of_queries:
                 return
-            if self.skip_existing and not ('ForgetQuery' in item):
-                yield item
-                counter += 1
+            if self.skip_existing and ('ForgetQuery' in item):
+                continue
+            yield item
+            counter += 1
 
     def write_corpus_to_file(self):
         with open(self.output_file_name, 'w') as outputCorpusFile:
@@ -44,7 +45,7 @@ class WebisCorpus:
 
 def main(arguments):
     skip_existing = False
-    num_of_queries = None
+    num_of_queries = 2755
     output_file = 'edited-webis-' + str(datetime.now()) + '.json'
 
     for current_argument, current_value in arguments:

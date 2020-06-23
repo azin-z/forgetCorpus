@@ -23,7 +23,7 @@ def timing_decorator(func):
     def wrapper(*args, **kwargs):
         start_time = time.time()
         output = func(*args, **kwargs)
-        print(bcolors.WARNING + "{} took {} seconds".format(func.__doc__, round(time.time() - start_time, 2)) + bcolors.ENDC)
+        print(bcolors.WARNING + "{} took {} seconds".format(func.__doc__, round(time.time() - start_time)) + bcolors.ENDC)
         return output
     return wrapper
 
@@ -47,14 +47,26 @@ class CommandLineActions:
     def user_continues():
         return input('Press enter to go to next query. Press anything else to exit. ') == ''
 
+    @staticmethod
+    def print_field_title(string):
+        print(bcolors.BOLD + string + ':\t', end=bcolors.ENDC)
+
+    @staticmethod
+    def print_field_text(string):
+        print(bcolors.OKGREEN + string + bcolors.ENDC)
+
     def print_item_info(self):
-        print(bcolors.BOLD + 'Subject:\t' + bcolors.ENDC, bcolors.OKGREEN + self.item['Subject'] + bcolors.ENDC)
-        print(bcolors.BOLD + 'Content:\t' + bcolors.ENDC, bcolors.OKGREEN + self.item['Content'] + bcolors.ENDC)
-        print(bcolors.BOLD + 'Chosen answer:\t' + bcolors.ENDC, bcolors.OKGREEN + self.item['ChosenAnswer'] + bcolors.ENDC)
+        self.print_field_title('Subject')
+        self.print_field_text(self.item['Subject'])
+        self.print_field_title('Content')
+        self.print_field_text(self.item['Content'])
+        self.print_field_title('Chosen Answer')
+        self.print_field_text(self.item['ChosenAnswer'])
 
     def modify_existing_query(self):
         if 'ForgetQuery' in self.item:
-            print(bcolors.BOLD + 'Existing query: \t' + bcolors.ENDC, bcolors.OKBLUE + self.item['ForgetQuery'] + bcolors.ENDC)
+            self.print_field_title('Existing Query')
+            print(bcolors.OKBLUE + self.item['ForgetQuery'] + bcolors.ENDC)
             return True
         return False
 
@@ -93,7 +105,9 @@ class WebisCorpus:
         done_items = list(x for x in self.data_list if 'ForgetQuery' in x)
         return str(round(len(done_items) / len(self.data_list) * 100, 2)) + '% of items done'
 
+    @timing_decorator
     def get_user_modifications(self):
+        """Getting user modifications to corpus"""
         modification_made = False
         for item in self.corpus_gen():
             modification_made = CommandLineActions(item).modify_item() or modification_made

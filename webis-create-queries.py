@@ -3,6 +3,8 @@ import argparse
 from datetime import datetime
 import glob
 import os
+import time
+import functools
 
 
 class bcolors:
@@ -16,21 +18,43 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
+def timing_decorator(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        output = func(*args, **kwargs)
+        print(bcolors.WARNING + "{} took {} seconds".format(func.__doc__, round(time.time() - start_time, 2)) + bcolors.ENDC)
+        return output
+    return wrapper
+
+
 class CommandLineActions:
+    def __init__(self, item):
+        self.item = item
+
+    @timing_decorator
+    def modify_item(self):
+        """Prompting for a single item"""
+        self.print_item_info()
+        new_query = self.get_new_query(self.modify_existing_query())
+        if not new_query == '':
+            self.item['ForgetQuery'] = new_query
+            self.log_entered_query(new_query)
+            return True
+        return False
+
     @staticmethod
     def user_continues():
         return input('Press enter to go to next query. Press anything else to exit. ') == ''
 
-    @staticmethod
-    def print_item_info(item):
-        print(bcolors.BOLD + 'Subject:\t' + bcolors.ENDC, bcolors.OKGREEN + item['Subject'] + bcolors.ENDC)
-        print(bcolors.BOLD + 'Content:\t' + bcolors.ENDC, bcolors.OKGREEN + item['Content'] + bcolors.ENDC)
-        print(bcolors.BOLD + 'Chosen answer:\t' + bcolors.ENDC, bcolors.OKGREEN + item['ChosenAnswer'] + bcolors.ENDC)
+    def print_item_info(self):
+        print(bcolors.BOLD + 'Subject:\t' + bcolors.ENDC, bcolors.OKGREEN + self.item['Subject'] + bcolors.ENDC)
+        print(bcolors.BOLD + 'Content:\t' + bcolors.ENDC, bcolors.OKGREEN + self.item['Content'] + bcolors.ENDC)
+        print(bcolors.BOLD + 'Chosen answer:\t' + bcolors.ENDC, bcolors.OKGREEN + self.item['ChosenAnswer'] + bcolors.ENDC)
 
-    @staticmethod
-    def modify_existing_query(item):
-        if 'ForgetQuery' in item:
-            print(bcolors.BOLD + 'Existing query: \t' + bcolors.ENDC, bcolors.OKBLUE + item['ForgetQuery'] + bcolors.ENDC)
+    def modify_existing_query(self):
+        if 'ForgetQuery' in self.item:
+            print(bcolors.BOLD + 'Existing query: \t' + bcolors.ENDC, bcolors.OKBLUE + self.item['ForgetQuery'] + bcolors.ENDC)
             return True
         return False
 
@@ -65,6 +89,18 @@ class WebisCorpus:
             counter += 1
             yield item
 
+    def get_completed_percentage(self):
+        done_items = list(x for x in self.data_list if 'ForgetQuery' in x)
+        return str(round(len(done_items) / len(self.data_list) * 100, 2)) + '% of items done'
+
+    def get_user_modifications(self):
+        modification_made = False
+        for item in self.corpus_gen():
+            modification_made = CommandLineActions(item).modify_item() or modification_made
+            if not CommandLineActions.user_continues():
+                break
+        return modification_made
+
     def write_corpus_to_file(self):
         with open(self.output_file_name, 'w') as outputCorpusFile:
             outputCorpusFile.write(json.dumps(self.data_list))
@@ -72,18 +108,9 @@ class WebisCorpus:
 
 def main(args):
     corpus = WebisCorpus(args)
-    modification_made = False
-    for item in corpus.corpus_gen():
-        CommandLineActions.print_item_info(item)
-        new_query = CommandLineActions.get_new_query(CommandLineActions.modify_existing_query(item))
-        if not new_query == '':
-            item['ForgetQuery'] = new_query
-            CommandLineActions.log_entered_query(new_query)
-            modification_made = True
-        if not CommandLineActions.user_continues():  # ask if user continues
-            break
-    if modification_made:
+    if corpus.get_user_modifications():
         corpus.write_corpus_to_file()
+    print(corpus.get_completed_percentage())
 
 
 if __name__ == "__main__":

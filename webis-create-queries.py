@@ -36,12 +36,14 @@ class CommandLineActions:
     def modify_item(self):
         """Prompting for a single item"""
         self.print_item_info()
-        new_query = self.get_new_query(self.modify_existing_query())
-        if not new_query == '':
-            self.item['ForgetQuery'] = new_query
-            self.log_entered_query(new_query)
-            return True
-        return False
+        while True:
+            new_query = self.get_new_query(self.modifies_existing_query())
+            if not len(new_query):
+                break
+            if self.save_entered_query(new_query):
+                self.item['ForgetQuery'] = new_query
+                break
+        return len(new_query) > 0
 
     @staticmethod
     def user_continues():
@@ -63,7 +65,7 @@ class CommandLineActions:
         self.print_field_title('Chosen Answer')
         self.print_field_text(self.item['ChosenAnswer'])
 
-    def modify_existing_query(self):
+    def modifies_existing_query(self):
         if 'ForgetQuery' in self.item:
             self.print_field_title('Existing Query')
             print(bcolors.OKBLUE + self.item['ForgetQuery'] + bcolors.ENDC)
@@ -71,8 +73,9 @@ class CommandLineActions:
         return False
 
     @staticmethod
-    def log_entered_query(new_query):
-        print('Saving following query: ' + bcolors.OKBLUE + new_query + bcolors.ENDC)
+    def save_entered_query(new_query):
+        print('Save following query: ' + bcolors.OKBLUE + new_query + '? ' + bcolors.ENDC)
+        return input('Enter to save, anything else to redo.') == ''
 
     @staticmethod
     def get_new_query(modify=False):
@@ -102,8 +105,10 @@ class WebisCorpus:
             yield item
 
     def get_completed_percentage(self):
-        done_items = list(x for x in self.data_list if 'ForgetQuery' in x)
-        return str(round(len(done_items) / len(self.data_list) * 100, 2)) + '% of items done'
+        done_count = len(list(x for x in self.data_list if 'ForgetQuery' in x))
+        total_count = len(self.data_list)
+        done_percentage = round(done_count/total_count*100, 2)
+        return str(done_percentage) + '% of items done'
 
     @timing_decorator
     def get_user_modifications(self):

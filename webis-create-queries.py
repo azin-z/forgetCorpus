@@ -128,6 +128,31 @@ class WebisCorpus:
                 break
         return modification_made
 
+    @timing_decorator
+    def get_query_result(self):
+        """Searching clueweb by forget query"""
+        from pyserini.setup import configure_classpath
+        configure_classpath('/home/azahrayi/memory-augmentation/anserini/target')
+        from jnius import autoclass
+        JString = autoclass('java.lang.String')
+        JSimpleSearcher = autoclass('io.anserini.search.SimpleSearcher')
+        searcher = JSimpleSearcher(
+        JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
+        for item in self.corpus_gen():
+            gold_doc_id = item['KnownItemId']
+            try:
+                query = item['ForgetQuery']
+            except:
+                continue
+            result_list = searcher.search(JString(query), 100)
+            print('***', query, '***')
+            for i, result in enumerate(result_list):
+                print('result id', result.docid)
+                if result.docid == gold_doc_id:
+                    print('doc found at position', (i + 1), 'query:', query)
+
+
+
     def write_corpus_to_file(self):
         with open(self.output_file_name, 'w') as outputCorpusFile:
             outputCorpusFile.write(json.dumps(self.data_list))
@@ -135,6 +160,9 @@ class WebisCorpus:
 
 def main(args):
     corpus = WebisCorpus(args)
+    if args.search:
+        corpus.get_query_result()
+        return
     if corpus.get_user_modifications():
         corpus.write_corpus_to_file()
     print(corpus.get_completed_percentage())
@@ -160,4 +188,7 @@ if __name__ == "__main__":
     parser.add_argument('--showAnswer', '-sa', type=bool, nargs='?',  const=True, required=False,
                         default=False,
                         help='show the chosen answer for the question when prompting')
+    parser.add_argument('--search', '-se', type=bool, nargs='?', const=True, required=False,
+                        default=False,
+                        help='search corpus with forget queries')
     main(parser.parse_args())

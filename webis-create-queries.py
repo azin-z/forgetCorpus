@@ -5,7 +5,14 @@ import glob
 import os
 import time
 import functools
-
+import pickle
+from pyserini.setup import configure_classpath
+configure_classpath('/home/azahrayi/memory-augmentation/anserini/target')
+from jnius import autoclass
+JString = autoclass('java.lang.String')
+JList = autoclass('java/util/ArrayList')
+JSimpleSearcher = autoclass('io.anserini.search.SimpleSearcher')
+searcher = JSimpleSearcher(JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
 
 class bcolors:
     HEADER = '\033[95m'
@@ -128,30 +135,50 @@ class WebisCorpus:
                 break
         return modification_made
 
-    @timing_decorator
-    def get_query_result(self):
-        """Searching clueweb by forget query"""
-        from pyserini.setup import configure_classpath
-        configure_classpath('/home/azahrayi/memory-augmentation/anserini/target')
-        from jnius import autoclass
-        JString = autoclass('java.lang.String')
-        JSimpleSearcher = autoclass('io.anserini.search.SimpleSearcher')
-        searcher = JSimpleSearcher(
-        JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
+    def build_query_dicts(self):
+        """building dictionaries for queries"""
+        id_gold_doc_dict = {}
+        id_forget_dict = {}
+        id_automatic_dict = {}
         for item in self.corpus_gen():
+            id = item['Id']
             gold_doc_id = item['KnownItemId']
+            id_gold_doc_dict[id] = gold_doc_id
             try:
+                id_automatic_dict[id] = item['Subject'] + item['Content']
                 query = item['ForgetQuery']
+                if query == 'NOTFORGETQUERY':
+                    continue
+                id_forget_dict[id] = query
             except:
                 continue
-            result_list = searcher.search(JString(query), 100)
-            print('***', query, '***')
-            for i, result in enumerate(result_list):
-                print('result id', result.docid)
-                if result.docid == gold_doc_id:
-                    print('doc found at position', (i + 1), 'query:', query)
+        pickle.dump(id_gold_doc_dict, open('id-gold-doc-dict' + '.p', "wb"))
+        pickle.dump(id_automatic_dict, open('id-automatic-dict' + '.p', "wb"))
+        pickle.dump(id_forget_dict, open('id-forget-dict' + '.p', "wb"))
 
+    @timing_decorator
+    def search_queries(self, query_pickle):
+        """Searching clueweb by forget query"""
+        queries = pickle.load(open(query_pickle, 'rb'))
+        result_dict = {}
+        jqueries = JList()
+        ids = JList()
+        gold_doc_dict = pickle.load(open('id-gold-doc-dict.p', 'rb'))
+        for query in list(queries.values()):
+            jqueries.add(query)
+        for id in list(queries.keys()):
+            ids.add(JString(id))
 
+        results = searcher.batchSearch(jqueries, ids, 100, 10)
+        resultsKeySet = results.keySet().toArray()
+        for resultKey in resultsKeySet:
+            for i, result in enumerate(results.get(resultKey)):
+                if result.docid == gold_doc_dict[resultKey]:
+                    result_dict[resultKey] = i
+                    break
+            if resultKey not in result_dict:
+                result_dict[resultKey] = None
+        return result_dict
 
     def write_corpus_to_file(self):
         with open(self.output_file_name, 'w') as outputCorpusFile:
@@ -161,7 +188,10 @@ class WebisCorpus:
 def main(args):
     corpus = WebisCorpus(args)
     if args.search:
-        corpus.get_query_result()
+        result = corpus.search_queries('id-forget-dict.p')
+        pickle.dump(result, open('forget-result-dict' + '.p', "wb"))
+        result = corpus.search_queries('id-automatic-dict.p')
+        pickle.dump(result, open('automatic-result-dict' + '.p', "wb"))
         return
     if corpus.get_user_modifications():
         corpus.write_corpus_to_file()

@@ -6,6 +6,15 @@ import os
 import time
 import functools
 import pickle
+import numpy as np
+import re
+from tqdm import tqdm
+import math
+lambda_val = 0.2
+
+#
+from collections import Counter
+
 from pyserini.setup import configure_classpath
 configure_classpath('/home/azahrayi/memory-augmentation/anserini/target')
 from jnius import autoclass
@@ -13,6 +22,9 @@ JString = autoclass('java.lang.String')
 JList = autoclass('java/util/ArrayList')
 JSimpleSearcher = autoclass('io.anserini.search.SimpleSearcher')
 searcher = JSimpleSearcher(JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
+JTerm = autoclass("org.apache.lucene.index.Term")
+JIndexReaderUtils = autoclass('io.anserini.index.IndexReaderUtils')
+reader = JIndexReaderUtils.getReader(JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
 
 class bcolors:
     HEADER = '\033[95m'
@@ -106,6 +118,11 @@ class WebisCorpus:
         self.data_list = None
         self.output_file_name = args.output
         self.showAnswer = args.showAnswer
+        self.doc_model_queries = {}
+        self.doc_model_queries[1] = {}
+        self.doc_model_queries[2] = {}
+        self.doc_model_queries[3] = {}
+        self.doc_model_queries[4] = {}
         with open(args.corpus) as corpusFile:
             self.data_list = json.loads(corpusFile.read())
 
@@ -118,6 +135,30 @@ class WebisCorpus:
                 continue
             counter += 1
             yield item
+
+    def build_document_dictionary(self):
+        id_doc_dict = {}
+        errorCount = 0
+        import requests
+        for item in tqdm(self.corpus_gen()):
+            link = item['KnownItemUrl']
+            try:
+                response = requests.get(
+                    'https://en.wikipedia.org/w/api.php',
+                    params={
+                        'action': 'query',
+                        'format': 'json',
+                        'titles': link.split('/')[-1],
+                        'prop': 'extracts',
+                        'exintro': True,
+                        'explaintext': True,
+                    }).json()
+                id_doc_dict[item['Id']] = next(iter(response['query']['pages'].values()))['extract']
+            except:
+                errorCount += 1
+        pickle.dump(id_doc_dict, open('id-doc-text-dict' + '.p', "wb"))
+        # 262 error count
+        print(errorCount)
 
     def get_completed_percentage(self):
         done_count = len(list(x for x in self.data_list if 'ForgetQuery' in x))
@@ -135,30 +176,201 @@ class WebisCorpus:
                 break
         return modification_made
 
-    def build_query_dicts(self):
-        """building dictionaries for queries"""
-        id_gold_doc_dict = {}
-        id_forget_dict = {}
-        id_automatic_dict = {}
-        for item in self.corpus_gen():
-            id = item['Id']
-            gold_doc_id = item['KnownItemId']
-            id_gold_doc_dict[id] = gold_doc_id
+    def get_term_doc_freq(self, term):
+        jterm = JTerm("contents", term)
+        df = reader.docFreq(jterm)
+        return df
+
+    def count_overlap_of_terms(self, pickle1, pickle2):
+        p1 = pickle.load(open(pickle1, 'rb'))
+        p2 = pickle.load(open(pickle2, 'rb'))
+        gold_doc_dict = pickle.load(open('id-gold-doc-dict.p', 'rb'))
+
+        TermsInCommon = 0
+        totalTerms = 0
+        terms_in_common_dict = {}
+        for key, value in p1.items():
+            counter = 0
+            termsInCommon = []
+            terms1 = list(set(re.split('\W+', value.lower())))
             try:
-                id_automatic_dict[id] = item['Subject'] + item['Content']
-                query = item['ForgetQuery']
-                if query == 'NOTFORGETQUERY':
-                    continue
-                id_forget_dict[id] = query
+                terms2 = list(set(re.split('\W+', p2[gold_doc_dict[key]].lower())))
             except:
                 continue
-        pickle.dump(id_gold_doc_dict, open('id-gold-doc-dict' + '.p', "wb"))
-        pickle.dump(id_automatic_dict, open('id-automatic-dict' + '.p', "wb"))
-        pickle.dump(id_forget_dict, open('id-forget-dict' + '.p', "wb"))
+            for term in terms1:
+                if term in terms2:
+                    termsInCommon.append(term)
+                    counter += 1
+            # print(counter, 'terms in', pickle1, 'appear also in', pickle2)
+            TermsInCommon += counter
+            totalTerms += len(terms1)
+            terms_in_common_dict[key] = ' '.join(termsInCommon)
+            # print(counter*100/len(terms1), '% of terms are common')
+            # print('the terms are:', termsInCommon)
+        # print(TermsInCommon, 'terms in common in total ')
+        print(len(terms_in_common_dict))
+        # pickle.dump(terms_in_common_dict, open('id-terms-in-common-automatoc-extract-dict.p', 'wb'))
+        pickle.dump(terms_in_common_dict, open('id-terms-in-common-automatoc-complete-dict.p', 'wb'))
+
+    def select_top_words(self, text):
+        terms = list(set(re.split('\W+', text.lower())))
+        idfs = []
+        for i, term in enumerate(terms):
+            try:
+                idf = 1/self.get_term_doc_freq(term)
+            except:
+                idf = 0
+            idfs.append(idf)
+        sum = np.sum(idfs)
+        idfs = list(idfs / sum)
+        picked_words = []
+        while len(picked_words) < 10 and len(idfs):
+            picked_word_index = idfs.index(max(idfs))
+            picked_word = terms[picked_word_index]
+            idfs.pop(picked_word_index)
+            if picked_word not in picked_words and \
+                            picked_word != 'remember' and picked_word != 'forget' and picked_word != 'remember':
+                picked_words.append(picked_word)
+
+        return ' '.join(picked_words)
+
+    def get_webis_docs(self):
+        from pyserini import collection, index
+        gold_doc_dict = pickle.load(open('id-gold-doc-dict.p', 'rb'))
+        webis_docid_list = gold_doc_dict.values()
+        webis_docid_list_first_second_names = [value.split('-')[1] + '-' + value.split('-')[2] for value in gold_doc_dict.values()]
+        print(webis_docid_list_first_second_names)
+        # webis_docid_list_first_names = [value.split('-')[1] for value in gold_doc_dict.values()]
+        webis_docid_document_content_dict = {}
+        paths_to_traverse = pickle.load(open('clueweb-paths-to-keep.p', 'rb'))
+
+        for path in tqdm(paths_to_traverse):
+            c = collection.Collection('ClueWeb09Collection', '/GW/D5data/Clueweb09-english/'+path)
+            generator = index.Generator('DefaultLuceneDocumentGenerator')
+            for (i, fs) in enumerate(c):
+                secondName = fs.segment_name.split('.')[0]  # this is the 03 thing
+                firstName = path.split('/')[1]  # this is the en000 hting
+                name = firstName + '-' + secondName
+                print(name)
+                if not name in webis_docid_list_first_second_names:
+                    continue
+                print('iterating', firstName + '-' + secondName, 'segment')
+                for (j, doc) in tqdm(enumerate(fs)):
+                    try:
+                        parsed = generator.create_document(doc)
+                        docid = parsed.get('id')  # FIELD_ID
+                        if docid in webis_docid_list:
+                            print('HUUURRAY', docid)
+                            webis_docid_document_content_dict[docid] = parsed.get('contents')
+                    except:
+                        print('null')
+        pickle.dump(webis_docid_document_content_dict, open('cleuweb-webis-id-doc-content-dict' + '.p', "wb"))
+
+    def make_azopardi_query(self):
+        id_doc_text = pickle.load(open('id-doc-text-dict.p', "rb"))
+        for id in id_doc_text.keys():
+            self.simulate_queries(id, 10)
+
+    def build_query_from_probs_dict(self, doc_id, doc_vector, model, query_len, doc_term_prob_dict):
+        probs = list(doc_term_prob_dict.values())
+        probs = probs / np.sum(probs)
+        query = np.random.choice(list(doc_term_prob_dict.keys()), query_len, p=probs)
+        print('*** model ' + str(model) + ': ', query)
+        # self.write_query_to_file(doc_id, model, query)
+        # self.write_probs_to_file(doc_id, model, doc_term_prob_dict)
+        for q_term in query:
+            try:
+                if doc_vector.containsKey(q_term):
+                    print('+++ ', q_term, 'from document with probability: {}'.format(doc_term_prob_dict[q_term]))
+                else:
+                    print('--- ', q_term, 'from collection with probability: {}'.format(doc_term_prob_dict[q_term]))
+            except:
+                print('!!! ', q_term, '(non ascii) from unclear origin with probability: {}'.format(doc_term_prob_dict[q_term]))
+
+        self.doc_model_queries[model][doc_id] = ' '.join(query)
+
+    def simulate_queries(self, doc_id, query_len):
+        collection_term_prob_dict = pickle.load(open('../nyt' + '/vars/' + 'nyt-collection_term_prob_dict' + '.p', "rb"))
+        collection_term_count_dict = pickle.load(open('../nyt' + '/vars/' + 'nyt-collection_term_count_dict' + '.p', "rb"))
+        id_doc_text = pickle.load(open('id-doc-text-dict.p', "rb"))
+        doc_term_prob_dict_m1 = collection_term_prob_dict.copy()
+        doc_term_prob_dict_m2 = collection_term_prob_dict.copy()
+        doc_term_prob_dict_m3 = collection_term_prob_dict.copy()
+        doc_term_prob_dict_m4 = collection_term_prob_dict.copy()
+        doc_term_probs_sum = 0
+        sum_doc_term_count = 0
+        sum_doc_pop_disc = 0
+        doc_vector = {}
+        for i in id_doc_text[doc_id].split(' '):
+            if i in doc_vector:
+                doc_vector[i] += 1
+            else:
+                doc_vector[i] = 1
+        print(doc_vector)
+        for term, count in doc_vector.items():
+            sum_doc_term_count += count
+            if collection_term_count_dict[term] > 0:
+                doc_term_probs_sum += float(1 / collection_term_count_dict[term])
+            else:
+                print('collection frequency for term {} is 0'.format(term))
+            df = self.get_term_doc_freq(term)
+            if df > 0:
+                sum_doc_pop_disc += count * math.log(503892800 / df)
+            else:
+                print('doc frequency for term: {} is 0'.format(term))
+
+        for term, count in doc_vector.items():
+            doc_term_prob_dict_m1[term] += float(1 - lambda_val) * (count / sum_doc_term_count)
+            doc_term_prob_dict_m2[term] += float(1 - lambda_val) / doc_vector.size()
+            doc_term_prob_dict_m3[term] += float(1 - lambda_val) \
+                                           / float(self.collection_term_count_dict[term] * doc_term_probs_sum)
+            df = self.get_term_doc_freq(term)
+            doc_term_prob_dict_m4[term] += float(1 - lambda_val) \
+                                           * float(count) * math.log(503892800 / df) / sum_doc_pop_disc
+        self.build_query_from_probs_dict(doc_id, doc_vector, 1, query_len, doc_term_prob_dict_m1)
+        self.build_query_from_probs_dict(doc_id, doc_vector, 2, query_len, doc_term_prob_dict_m2)
+        self.build_query_from_probs_dict(doc_id, doc_vector, 3, query_len, doc_term_prob_dict_m3)
+        self.build_query_from_probs_dict(doc_id, doc_vector, 4, query_len, doc_term_prob_dict_m4)
+
+
+    def build_query_dicts(self):
+        """building dictionaries for queries"""
+        # id_gold_doc_dict = {}
+        # id_forget_dict = {}
+        # id_automatic_dict = {}
+        # id_automatic_subject_dict = {}
+        # id_automatic_idf_dict = {}
+        # id_forget_idf_dict = {}
+        # id_doc_title_dict = {}
+        id_doc_idf_dict = {}
+
+        for key, value in tqdm(pickle.load(open('id-terms-in-common-automatoc-complete-dict.p', "rb")).items()):
+        # for item in self.corpus_gen():
+        #     id = item['Id']
+            # gold_doc_id = item['KnownItemId']
+            # id_gold_doc_dict[id] = gold_doc_id
+            try:
+            # id_automatic_idf_dict[id] = self.select_top_words(item['Subject'] + item['Content'])
+            # id_doc_title_dict[id] = item['KnownItemUrl'].split('/')[-1].replace('_', ' ').replace('-', ' ').replace('.html', '').replace('.jsp', '').replace('.htm','').replace('.php', '').lower()
+                # query = item['ForgetQuery']
+                # if query == 'NOTFORGETQUERY':
+                #     continue
+                # id_forget_idf_dict[id] = self.select_top_words(query)
+                id_doc_idf_dict[key] = self.select_top_words(value)
+            except:
+                continue
+        # pickle.dump(id_gold_doc_dict, open('id-gold-doc-dict' + '.p', "wb"))
+        # pickle.dump(id_automatic_dict, open('id-automatic-dict' + '.p', "wb"))
+        # pickle.dump(id_forget_dict, open('id-forget-dict' + '.p', "wb"))
+        # pickle.dump(id_automatic_idf_dict, open('id-automatic-idf-dict' + '.p', "wb"))
+        # pickle.dump(id_forget_idf_dict, open('id-forget-idf-dict' + '.p', "wb"))
+        # pickle.dump(id_doc_title_dict, open('id-doc-title-dict' + '.p', "wb"))
+        # pickle.dump(id_doc_idf_dict, open('id-doc-idf-dict' + '.p', "wb"))
+        pickle.dump(id_doc_idf_dict, open('id-common-complete-idf-dict' + '.p', "wb"))
 
     @timing_decorator
     def search_queries(self, query_pickle):
-        """Searching clueweb by forget query"""
+        """Searching clueweb by query file"""
         queries = pickle.load(open(query_pickle, 'rb'))
         result_dict = {}
         jqueries = JList()
@@ -167,9 +379,12 @@ class WebisCorpus:
         for query in list(queries.values()):
             jqueries.add(query)
         for id in list(queries.keys()):
-            ids.add(JString(id))
-
-        results = searcher.batchSearch(jqueries, ids, 100, 10)
+            ids.add(id)
+        # searcher.setRM3Reranker()
+        # searcher.setLMDirichletSimilarity(2000)
+        # print('rm3 status', searcher.setRM3Reranker())
+        # print(jqueries)
+        results = searcher.batchSearch(jqueries, ids, 500, 10)
         resultsKeySet = results.keySet().toArray()
         for resultKey in resultsKeySet:
             for i, result in enumerate(results.get(resultKey)):
@@ -180,18 +395,92 @@ class WebisCorpus:
                 result_dict[resultKey] = None
         return result_dict
 
+    def calculate_mrr(self, result_pickle, query_pickle=None):
+        # gold_doc_dict = pickle.load(open('id-gold-doc-dict.p', 'rb'))
+        result = pickle.load(open(result_pickle, 'rb'))
+        queries = pickle.load(open(query_pickle, 'rb'))
+        mrr = 0
+        hits = 0
+        for key, value in list(result.items()):
+            if value is not None:
+                # print(hits, '**', queries[key])
+                # print(gold_doc_dict[key]
+                hits += 1
+                mrr += 1/(value+1)
+        print(mrr/len(result.items()), 'for ', result_pickle)
+        print('total hits', hits, 'out of', len(result.items()))
+
     def write_corpus_to_file(self):
         with open(self.output_file_name, 'w') as outputCorpusFile:
             outputCorpusFile.write(json.dumps(self.data_list))
 
 
+
+def dump_collection_and_vocab_size(corpus_name):
+    iterator = JIndexReaderUtils.getTerms(reader)
+    start_time = time.time()
+    counter = 0
+    collection_size = 0
+    coll_term_count_dict = Counter()
+
+    while iterator.hasNext():
+        counter += 1
+        index_term = iterator.next()
+        collection_size += index_term.getTotalTF()
+        coll_term_count_dict[index_term.getTerm()] = index_term.getTotalTF()
+        if counter % 100000 == 0:
+            print("processing {} took {} and collection size: {}".format(counter, time.time() - start_time, collection_size))
+    pickle.dump(collection_size, open(corpus_name + '/vars/' + corpus_name + '-collection_vocab_size.p', 'wb'))
+    pickle.dump(counter, open(corpus_name + '/vars/' + corpus_name + '-collection-size.p', 'wb'))
+    pickle.dump(coll_term_count_dict, open(corpus_name + '/vars/' + corpus_name + '-collection_term_count_dict.p', 'wb'))
+    print("processing {} took {} and total number of terms in collection are: {}".format(counter, time.time() - start_time, collection_size))
+    coll_term_prob_dict = {}
+    for term, count in coll_term_count_dict.items():
+        coll_term_prob_dict[term] = float(lambda_val * count) / float(collection_size)
+    print(len(coll_term_prob_dict))
+    pickle.dump(coll_term_prob_dict, open(corpus_name + '/vars/' + corpus_name + '-collection_term_prob_dict.p', 'wb'))
+
 def main(args):
     corpus = WebisCorpus(args)
     if args.search:
-        result = corpus.search_queries('id-forget-dict.p')
-        pickle.dump(result, open('forget-result-dict' + '.p', "wb"))
-        result = corpus.search_queries('id-automatic-dict.p')
-        pickle.dump(result, open('automatic-result-dict' + '.p', "wb"))
+        # corpus.get_webis_docs()
+        # corpus.build_document_dictionary()
+        # corpus.build_query_dicts()
+        # result = corpus.search_queries('id-automatic-subject-dict.p')
+        # pickle.dump(result, open('automatic-subject-result-dict' + '.p', "wb"))
+        # result = corpus.search_queries('id-automatic-idf-dict.p')
+        # pickle.dump(result, open('automatic-idf-result-dict' + '.p', "wb"))
+        # result = corpus.search_queries('id-forget-dict.p')
+        # pickle.dump(result, open('forget-top-500-result-dict' + '.p', "wb"))
+        # result = corpus.search_queries('id-doc-title-dict' + '.p')
+        # pickle.dump(result, open('doc-title-dict' + '.p', "wb"))
+        # corpus.calculate_mrr('automatic-result-dict.p')
+        # corpus.calculate_mrr('forget-result-dict.p')
+        # corpus.calculate_mrr('automatic-idf-result-dict.p')
+        # corpus.calculate_mrr('forget-rm3-result-dict.p')
+        # corpus.calculate_mrr('automatic-subject-result-dict.p')
+        # result = corpus.search_queries('id-forget-dict.p')
+        # pickle.dump(result, open('forget-lmd-result-dict' + '.p', "wb"))
+        # result = corpus.search_queries('id-doc-idf-dict.p')
+        # pickle.dump(result, open('doc-idf-result-dict' + '.p', "wb"))
+        # corpus.calculate_mrr('forget-top-500-result-dict' + '.p')
+        # corpus.calculate_mrr('doc-title-result-dict' + '.p')
+        # corpus.calculate_mrr('doc-idf-result-dict' + '.p')
+        # corpus.count_overlap_of_terms('id-forget-dict.p', 'id-doc-text-dict.p')
+        # corpus.count_overlap_of_terms('id-forget-dict.p', 'id-doc-text-dict.p')
+        # corpus.count_overlap_of_terms('id-automatic-dict.p', 'id-doc-text-dict.p')
+        # result = corpus.search_queries('id-terms-in-common-automatoc-extract-dict.p')
+        # pickle.dump(result, open('terms-in-common-automatoc-extract-result-dict.p', "wb"))
+        # corpus.count_overlap_of_terms('id-automatic-dict.p', 'cleuweb-webis-id-doc-content-dict.p')
+        # result = corpus.search_queries('id-terms-in-common-automatoc-complete-dict.p')
+        # pickle.dump(result, open('terms-in-common-automatoc-complete-result-dict.p', "wb"))
+        # corpus.calculate_mrr('terms-in-common-automatoc-complete-result-dict.p', 'id-terms-in-common-automatoc-complete-dict.p')
+        # result = corpus.search_queries('id-common-complete-idf-dict' + '.p')
+        # pickle.dump(result, open('id-common-complete-result-dict.p', "wb"))
+        # corpus.calculate_mrr('id-common-complete-result-dict.p', 'id-common-complete-idf-dict.p' )
+        # dump_collection_and_vocab_size('clueweb')
+        corpus.make_azopardi_query()
+        # corpus.get_webis_docs()
         return
     if corpus.get_user_modifications():
         corpus.write_corpus_to_file()

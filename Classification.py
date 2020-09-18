@@ -3,10 +3,15 @@ from utils import Utils, timing_decorator
 import POS as pos
 import NER as ner
 
+import numpy as np
+
+from sklearn import svm
+
+
 class Classification:
-    def __init__(self):
-        from sklearn import svm
+    def __init__(self, use_ner=True):
         self.clf = svm.SVC()
+        self.use_ner = use_ner
         self.reader = anserini.JIndexReaderUtils.getReader(
             anserini.JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
         self.X = []  # shape (n_samples, n_features)
@@ -14,6 +19,7 @@ class Classification:
 
     @timing_decorator
     def train(self):
+        """training classifier with given examples"""
         self.clf.fit(self.X, self.y)
         self.flush()
 
@@ -28,7 +34,7 @@ class Classification:
         return result
 
     def save_model(self, train_samples):
-        Utils.dump_to_pickle(self.clf, 'classifiermodels/clf-model-no-common-words' + str(train_samples) + '.p')
+        Utils.dump_to_pickle(self.clf, 'classifiermodels/clf-model-no-common-words-ner-' + str(self.use_ner) + '-' + str(train_samples) + '.p')
 
     def load_model(self, name):
         self.clf = Utils.load_from_pickle(name)
@@ -62,12 +68,14 @@ class Classification:
         return df
 
     def add_sample(self, tf, idf, tf_in_q, rel_pos, is_in_subject, is_in_content, is_noun, is_adj, is_entity, is_in_doc):
-        # print([tf, idf, tf*idf, tf_in_q, rel_pos, is_in_subject, is_in_content])
         self.X.append([tf, idf, tf*idf, tf_in_q, rel_pos, is_in_subject, is_noun, is_adj, is_entity, is_in_content])
         self.y.append(is_in_doc)
 
-    def process_block(self, terms, block_type, term_doc_count_dict, total_length, entity_words, silver_query):
+    def process_block(self, text, terms, block_type, term_doc_count_dict, total_length, silver_query):
         pos_tags = pos.get_pos_tags(terms)
+        entity_words = set()
+        if self.use_ner:
+            entity_words = ner.get_entities(text)
         for i, (term, pos_tag) in enumerate(zip(terms, pos_tags)):
             is_in_subject = int(block_type == 'subject')
             is_in_content = int(block_type == 'content')
@@ -94,7 +102,7 @@ class Classification:
         subject_terms = anserini.tokenizeString(subject, 'lucene')
         content_terms = anserini.tokenizeString(content, 'lucene')
         total_length = len(subject_terms) + len(content_terms)
-        self.process_block(subject_terms, 'subject', doc_vector, total_length, ner.get_entities(subject), silver_query)
-        self.process_block(content_terms, 'content', doc_vector, total_length, ner.get_entities(content), silver_query)
+        self.process_block(subject, subject_terms, 'subject', doc_vector, total_length, silver_query)
+        self.process_block(content, content_terms, 'content', doc_vector, total_length, silver_query)
         return subject_terms + content_terms
 

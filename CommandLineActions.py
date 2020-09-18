@@ -1,5 +1,6 @@
 from utils import Utils, bcolors, timing_decorator
 
+
 class CommandLineActions:
     def __init__(self, item, show_answer):
         self.item = item

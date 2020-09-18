@@ -2,6 +2,7 @@ import pickle
 import functools
 import time
 
+
 class Utils:
     @staticmethod
     def dump_to_pickle(obj_to_dump, pickle_name):
@@ -33,3 +34,18 @@ def timing_decorator(func):
         return output
     return wrapper
 
+
+def calculate_mrr(result_pickle):
+    result = Utils.load_from_pickle(result_pickle)
+    mrr = 0
+    hits = 0
+    for key, value in list(result.items()):
+        if value is not None:
+            hits += 1
+            mrr += 1/(value+1)
+    try:
+        print('mrr for hits', mrr/hits, 'for ', result_pickle)
+        print('mrr for all', mrr/len(result), 'for ', result_pickle)
+        print('total hits', hits, 'out of', len(result.items()))
+    except Exception as e:
+        print(e, 'occurred')

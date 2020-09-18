@@ -9,9 +9,9 @@ import random
 from tqdm import tqdm
 from collections import Counter
 
-from utils import Utils, bcolors, timing_decorator
+from utils import Utils, bcolors, timing_decorator, calculate_mrr
 from Azzopardi import AzzopardiFunctions
-import Classification as Classification
+from Classification import Classification
 import anserini as anserini
 from CommandLineActions import CommandLineActions
 import NER as ner
@@ -58,8 +58,8 @@ class WebisCorpus:
             counter += 1
             yield item
 
-    def classify(self, train=True, makeQueries=False, train_samples=1000):
-        classification = Classification()
+    def classify(self, train=True, makeQueries=False, train_samples=1000, use_ner=True):
+        classification = Classification(use_ner)
         query_dict = {}
         silver_dict = Utils.load_from_pickle('id-terms-in-common-no-stopwords-and-common-words-automatic-doc-lucene-dict.p')
         if train:
@@ -70,10 +70,8 @@ class WebisCorpus:
             classification.train()
             classification.save_model(train_samples)
         else:
-            classification.load_model('classifiermodels/clf-model-no-common-words1000.p')
+            classification.load_model('classifiermodels/clf-model-no-common-words-ner-False-100.p')
         for i, item in enumerate(self.corpus_gen()):
-            # if i > 1000:
-            #     break
             full_terms = classification.process_query(item['Subject'], item['Content'], silver_dict[item['Id']])
             if makeQueries:
                 result = classification.predict().tolist()
@@ -85,16 +83,13 @@ class WebisCorpus:
                     full_terms.pop(picked_word_index)
                     if picked_word not in query_terms:
                         query_terms.append(picked_word)
-                # print('result', result)
                 # query_terms = [full_terms[i] for i in range(len(result)) if result[i] == 1]
                 query_terms = ' '.join(set(query_terms))
                 print('classifier:', query_terms)
                 query_dict[item['Id']] = query_terms
-            # print(full_terms)
                 print('silver:', silver_dict[item['Id']])
-            # # print(result)
         if makeQueries:
-            Utils.dump_to_pickle(query_dict, 'id-svm-made-query-pos-ner-top-10-' + str(train_samples) +'.p')
+            Utils.dump_to_pickle(query_dict, 'id-svm-made-query-pos-top-10-' + str(train_samples) +'.p')
         else:
             result = classification.predict()
             classification.getAccuracy(result)
@@ -283,9 +278,8 @@ class WebisCorpus:
                     print('error ', e, 'occured in processing', id)
         else:
             result = self.search_queries('azzopardi/e-id-pardi-model-' + str(option) + '-with-coll-queries.p', rm3=False, miniIndex=True)
-            Utils.dump_to_pickle(result, 'azzopardi/pardi-model-' + str(option) + '-with-coll-result-dict.p' )
-            self.calculate_mrr('azzopardi/pardi-model-' + str(option) + '-with-coll-result-dict.p')
-
+            Utils.dump_to_pickle(result, 'azzopardi/pardi-model-' + str(option) + '-with-coll-result-dict.p')
+            calculate_mrr('azzopardi/pardi-model-' + str(option) + '-with-coll-result-dict.p')
 
 
     @timing_decorator
@@ -312,7 +306,11 @@ class WebisCorpus:
                     id_query_dict[id] = self.select_top_words(item['Subject'] + item['Content'], k, type)
             except:
                 continue
-        Utils.dump_to_pickle(id_query_dict, 'id-' + type + '-top-' + str(k) + '-dict.p')
+        if k is None:
+            Utils.dump_to_pickle(id_query_dict, 'id-' + type + '-dict.p')
+        else:
+            Utils.dump_to_pickle(id_query_dict, 'id-' + type + '-top-' + str(k) + '-dict.p')
+        print(len(id_query_dict.items()))
         return id_query_dict
 
     @timing_decorator
@@ -352,22 +350,6 @@ class WebisCorpus:
             if resultKey not in result_dict:
                 result_dict[resultKey] = None
         return result_dict
-
-    @staticmethod
-    def calculate_mrr(result_pickle, query_pickle=None):
-        result = Utils.load_from_pickle(result_pickle)
-        mrr = 0
-        hits = 0
-        for key, value in list(result.items()):
-            if value is not None:
-                hits += 1
-                mrr += 1/(value+1)
-        try:
-            print('mrr for hits', mrr/hits, 'for ', result_pickle)
-            print('mrr for all', mrr/len(result), 'for ', result_pickle)
-            print('total hits', hits, 'out of', len(result.items()))
-        except Exception as e:
-            print(e, 'occurred')
 
     def write_corpus_to_file(self):
         with open(self.output_file_name, 'w') as outputCorpusFile:
@@ -417,8 +399,9 @@ def make_random_mini_collection_vocab(type):
 
 
 def dump_collection_and_vocab_size(corpus_name):
-    reader = JIndexReaderUtils.getReader(JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
-    iterator = JIndexReaderUtils.getTerms(reader)
+    lambda_val = 0.8
+    reader = anserini.JIndexReaderUtils.getReader(anserini.JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
+    iterator = anserini.JIndexReaderUtils.getTerms(reader)
     start_time = time.time()
     counter = 0
     collection_size = 0
@@ -466,24 +449,22 @@ def remove_stopwords():
 def main(args):
     corpus = WebisCorpus(args)
     if args.experiment == 'classifier':
-        train_samples = 2755
-        corpus.classify(train=True, makeQueries=True, train_samples=train_samples)
-        result = corpus.search_queries('id-svm-made-query-pos-ner-top-10-' + str(train_samples) + '.p')
-        Utils.dump_to_pickle(result, 'svm-made-query-pos-ner-top-10-' + str(train_samples) + '-result.p')
-        corpus.calculate_mrr('svm-made-query-pos-ner-top-10-' + str(train_samples) + '-result.p')
+        train_samples = 1000
+        corpus.classify(train=True, makeQueries=True, train_samples=train_samples, use_ner=(not args.no_ner))
+        result = corpus.search_queries('id-svm-made-query-pos-top-10-' + str(train_samples) + '.p')
+        Utils.dump_to_pickle(result, 'svm-made-query-pos-top-10-' + str(train_samples) + '-result.p')
+        calculate_mrr('svm-made-query-pos-top-10-' + str(train_samples) + '-result.p')
         # corpus.classify(makeQueries=True)
         return
     if args.experiment == 'term-cf':
         print(corpus.get_term_coll_freq('i'), 'i')
-        print(corpus.get_term_coll_freq('johnny'), 'johnny')
-        print(corpus.get_term_doc_freq('johnny'), 'johnny df')
-        print(corpus.get_term_coll_freq(args.term), args.term, 'df')
+        print(corpus.get_term_coll_freq(args.term), args.term, 'cf')
         print(corpus.get_term_doc_freq(args.term), args.term, 'df')
         return
     if args.experiment == 'search-no-stopwords-no-common-words':
         result = corpus.search_queries('id-terms-in-common-no-stopwords-and-common-words-automatic-doc-lucene-dict.p')
         Utils.dump_to_pickle(result, 'terms-in-common-no-stopwords-and-common-words-automatic-doc-lucene-dict-result.p')
-        corpus.calculate_mrr('terms-in-common-no-stopwords-and-common-words-automatic-doc-lucene-dict-result.p')
+        calculate_mrr('terms-in-common-no-stopwords-and-common-words-automatic-doc-lucene-dict-result.p')
         return
     if args.experiment == 'search-ner-only':
         queries = {}
@@ -494,12 +475,12 @@ def main(args):
         # queries = corpus.build_query_dicts('ne')
         result = corpus.search_queries('id-only-ne.p')
         Utils.dump_to_pickle(result, 'only-ne-result.p')
-        corpus.calculate_mrr('only-ne-result.p')
+        calculate_mrr('only-ne-result.p')
         return
     if args.experiment == 'search-automatic':
         result = corpus.search_queries('id-automatic-dict.p')
         Utils.dump_to_pickle(result, 'automatic-result.p')
-        corpus.calculate_mrr('automatic-result.p')
+        calculate_mrr('automatic-result.p')
         return
     if args.experiment == 'mini-coll':
         make_random_mini_collection_vocab(1)
@@ -524,8 +505,10 @@ def main(args):
         pickle.dump(result, open('terms-in-common-complete-tf-result-dict.p', "wb"))
         return
     if args.experiment == "search-forget":
-        result = corpus.search_queries('id-forget-dict.p')
-        Utils.dump_to_pickle(result, 'forget-result-dict.p')
+        corpus.build_query_dicts('handwritten')
+        result = corpus.search_queries('id-handwritten-dict.p')
+        Utils.dump_to_pickle(result, 'forget-handwritten-dict.p')
+        calculate_mrr('forget-result-dict.p')
         return
     if args.experiment == "search-forget-mini":
         result = corpus.search_queries('id-forget-dict.p')
@@ -551,43 +534,43 @@ def main(args):
         corpus.make_query_with_overlapping_terms('id-forget-dict.p', 'id-doc-text-dict.p', 'forget-doc', args.analyzer)
         result = corpus.search_queries('id-terms-in-common-forget-doc-dict.p')
         Utils.dump_to_pickle(result, 'result-dict-terms-in-common-forget-doc.p')
-        corpus.calculate_mrr('result-dict-terms-in-common-forget-doc.p')
-        corpus.calculate_mrr('forget-top-500-result-dict.p')
+        calculate_mrr('result-dict-terms-in-common-forget-doc.p')
+        calculate_mrr('forget-top-500-result-dict.p')
         return
     if args.experiment == "overlap-terms-automatic":
         # corpus.build_query_dicts()
         # corpus.count_overlap_of_terms('id-automatic-dict.p', 'cleuweb-webis-id-doc-content-dict.p', 'automatic-doc-' + args.analyzer, args.analyzer)
         result = corpus.search_queries('id-terms-in-common-automatic-doc-'+args.analyzer+'-dict.p')
         Utils.dump_to_pickle(result, 'result-dict-terms-in-common-automatic-doc-' + args.analyzer + 'analyzer' + '.p')
-        corpus.calculate_mrr('result-dict-terms-in-common-automatic-doc-' + args.analyzer + 'analyzer' + '.p') #so weird...
-        # # corpus.calculate_mrr('terms-in-common-automatoc-complete-result-dict.p')
-        corpus.calculate_mrr('automatic-top-500-result-dict.p')
+        calculate_mrr('result-dict-terms-in-common-automatic-doc-' + args.analyzer + 'analyzer' + '.p')
+        # # calculate_mrr('terms-in-common-automatoc-complete-result-dict.p')
+        calculate_mrr('automatic-top-500-result-dict.p')
         return
     if args.experiment == "tf-idf-queries":
         for k in range(5, 30, 5):
             corpus.grid_build_search('tf-idf', k)
         for k in range(5, 30, 5):
-            corpus.calculate_mrr('result-dict-tf-idf-top-' + str(k) + '.p')
+            calculate_mrr('result-dict-tf-idf-top-' + str(k) + '.p')
         return
     if args.experiment == 'random-grid':
         for k in range(5, 30, 5):
             corpus.grid_build_search('random', k)
         for k in range(5, 30, 5):
-            corpus.calculate_mrr('result-dict-random-top-' + str(k) + '.p')
+            calculate_mrr('result-dict-random-top-' + str(k) + '.p')
     if args.experiment == "tf-queries":
         for k in range(5, 30, 5):
             corpus.grid_build_search('tf', k)
         for k in range(5, 30, 5):
-            corpus.calculate_mrr('result-dict-tf-top-' + str(k) + '.p')
+            calculate_mrr('result-dict-tf-top-' + str(k) + '.p')
         return
     if args.experiment == "idf-queries":
         corpus.grid_build_search('idf', 3821)
-        corpus.calculate_mrr('result-dict-idf-top-' + str(3821) + '.p')
+        calculate_mrr('result-dict-idf-top-' + str(3821) + '.p')
         return
     if args.search:
         print('search')
         if args.resultpickle:
-            corpus.calculate_mrr(args.resultpickle)
+            calculate_mrr(args.resultpickle)
         return
     if corpus.get_user_modifications():
         corpus.write_corpus_to_file()
@@ -634,8 +617,11 @@ if __name__ == "__main__":
                         help='specify experiment to run')
     parser.add_argument('--analyzer', '-ana', type=str, required=False,
                         default='none',
-                        help='specify tokenizer to use to, none or lucene ')
+                        help='specify tokenizer to use, none or lucene ')
     parser.add_argument('--index', '-ind', type=str, required=False,
                         default='full',
-                        help='specify tokenizer to use to, none or lucene ')
+                        help='specify index to use, mini(only webis docs) or full(all of clueweb09) ')
+    parser.add_argument('--no_ner', '-no_ner', type=bool, required=False, nargs='?', const=True,
+                        default=False,
+                        help='use named entities for classifier')
     main(parser.parse_args())

@@ -9,9 +9,10 @@ from sklearn import svm
 
 
 class Classification:
-    def __init__(self, use_ner=True):
+    def __init__(self, use_ner=True, use_noun=True, use_verb=True, train_samples=1000, useTFIDF=True):
         self.clf = svm.SVC()
         self.use_ner = use_ner
+        self.use_pos = True
         self.reader = anserini.JIndexReaderUtils.getReader(
             anserini.JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
         self.X = []  # shape (n_samples, n_features)
@@ -33,11 +34,11 @@ class Classification:
         self.flush()
         return result
 
-    def save_model(self, train_samples):
-        Utils.dump_to_pickle(self.clf, 'classifiermodels/clf-model-no-common-words-ner-' + str(self.use_ner) + '-' + str(train_samples) + '.p')
+    def save_model(self, name):
+        Utils.dump_to_pickle(self.clf, 'classifiermodels/' + name)
 
     def load_model(self, name):
-        self.clf = Utils.load_from_pickle(name)
+        self.clf = Utils.load_from_pickle('classifiermodels/' + name)
 
     def getAccuracy(self, result):
         totalTrue = 0

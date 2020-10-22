@@ -24,3 +24,23 @@ def tokenizeString(string, analyzer=None):
         return analyzerUtils.tokenize(engAnalyzer, string).toArray()
     return re.split('\W+', string.lower())
 
+searcher = JSimpleSearcher(JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
+reader = JIndexReaderUtils.getReader(JString(
+    '/home/azahrayi/memory-augmentation/query-simulation/ForgetCorpus/webis-docs/index.pos+docvectors+raw'))
+
+minisearcher = JSimpleSearcher(JString(
+    '/home/azahrayi/memory-augmentation/query-simulation/ForgetCorpus/webis-docs/index.pos+docvectors+raw+porter'))
+minireader = JIndexReaderUtils.getReader(JString(
+    '/home/azahrayi/memory-augmentation/query-simulation/ForgetCorpus/webis-docs/index.pos+docvectors+raw'))
+
+
+def get_term_coll_freq(term):
+    jterm = JTerm("contents", term.lower())
+    cf = reader.totalTermFreq(jterm)
+    return cf
+
+
+def get_term_doc_freq(term):
+    jterm = JTerm("contents", term)
+    df = reader.docFreq(jterm)
+    return df

@@ -10,5 +10,5 @@ def get_entities(text):
         for word in anserini.tokenizeString(ent.text):
             if not ent.label_ == 'CARDINAL' and not ent.label_ == 'DATE':
                 entity_words.add(word)
-                print(ent.text, ent.start_char, ent.end_char, ent.label_)
+                # print(ent.text, ent.start_char, ent.end_char, ent.label_)
     return entity_words

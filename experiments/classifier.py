@@ -5,11 +5,11 @@ from Classification import Classification
 
 class ClassifierExperminet(Experiment):
 
-    def __init__(self, webiscorpus, train_samples=1000, use_ner=True, useTFIDF=True):
+    def __init__(self, webiscorpus, train_samples=1000, use_ner=True, useTFIDF=True, use_noun=True, use_verb=True, use_adj=True):
         self.train_samples = train_samples
-        self.model_name = 'clf-model-ner' + str(use_ner) + '-' + str(self.train_samples) + '.p'
+        self.model_name = 'clf-model-ner' + str(use_ner) + '-noun' + str(use_noun) + '-verb' + str(use_verb) + '-adj' + str(use_adj) + '-' + str(self.train_samples) + '.p'
         self.train_samples = train_samples
-        self.classification = Classification(use_ner=use_ner, train_samples=train_samples, useTFIDF=useTFIDF)
+        self.classification = Classification(use_ner=use_ner, train_samples=train_samples, use_noun=use_noun, use_verb=use_verb, use_adj=use_adj, useTFIDF=useTFIDF)
         self.silver_dict = Utils.load_from_pickle(
             'id-terms-in-common-no-stopwords-and-common-words-automatic-doc-lucene-dict.p')
         super(ClassifierExperminet, self).__init__(self.model_name, webiscorpus)

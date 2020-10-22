@@ -35,22 +35,6 @@ def timing_decorator(func):
     return wrapper
 
 
-# def calculate_mrr(result_pickle):
-#     result = Utils.load_from_pickle(result_pickle)
-#     mrr = 0
-#     hits = 0
-#     for key, value in list(result.items()):
-#         if value is not None:
-#             hits += 1
-#             mrr += 1/(value+1)
-#     try:
-#         print('mrr for hits', mrr/hits, 'for ', result_pickle)
-#         print('mrr for all', mrr/len(result), 'for ', result_pickle)
-#         print('total hits', hits, 'out of', len(result.items()))
-#     except Exception as e:
-#         print(e, 'occurred')
-
-
 def get_white_listed_ids():  # not pc
     white_listed_ids = set()
     forget_queries = Utils.load_from_pickle('forget-handwritten-dict.p')

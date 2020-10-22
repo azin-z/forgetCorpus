@@ -9,12 +9,13 @@ from sklearn import svm
 
 
 class Classification:
-    def __init__(self, use_ner=True, use_noun=True, use_verb=True, train_samples=1000, useTFIDF=True):
+    def __init__(self, use_ner=True, use_noun=True, use_verb=True, use_adj=True, train_samples=1000, useTFIDF=True):
         self.clf = svm.SVC()
         self.use_ner = use_ner
-        self.use_pos = True
-        self.reader = anserini.JIndexReaderUtils.getReader(
-            anserini.JString('/GW/D5data-10/Clueweb/anserini0.9-index.clueweb09.englishonly.nostem.stopwording'))
+        self.use_verb = use_verb
+        self.use_noun = use_noun
+        self.use_adj = use_adj
+        self.useTFIDF = useTFIDF
         self.X = []  # shape (n_samples, n_features)
         self.y = []  # shape n_samples the labels for the samples
 
@@ -58,16 +59,6 @@ class Classification:
         print('recall:', correctlyPredictedTrue/totalTrue)
         print('precision:', correctlyPredictedTrue/np.count_nonzero(result == 1))
 
-    def get_term_coll_freq(self, term):
-        jterm = anserini.JTerm("contents", term.lower())
-        cf = self.reader.totalTermFreq(jterm)
-        return cf
-
-    def get_term_doc_freq(self, term):
-        jterm = anserini.JTerm("contents", term)
-        df = self.reader.docFreq(jterm)
-        return df
-
     def add_sample(self, tf, idf, tf_in_q, rel_pos, is_in_subject, is_in_content, is_noun, is_adj, is_entity, is_in_doc):
         self.X.append([tf, idf, tf*idf, tf_in_q, rel_pos, is_in_subject, is_noun, is_adj, is_entity, is_in_content])
         self.y.append(is_in_doc)
@@ -80,12 +71,21 @@ class Classification:
         for i, (term, pos_tag) in enumerate(zip(terms, pos_tags)):
             is_in_subject = int(block_type == 'subject')
             is_in_content = int(block_type == 'content')
-            is_noun = int(pos_tag == 'NOUN')
-            is_adj = int(pos_tag == 'ADJ')
-            is_entity = int(term in entity_words)
-            tf = float(self.get_term_coll_freq(term)) / 689710000
+            if self.use_noun:
+                is_noun = int(pos_tag == 'NOUN')
+            else:
+                is_noun = 0
+            if self.use_adj:
+                is_adj = int(pos_tag == 'ADJ')
+            else:
+                is_adj = 0
+            if self.use_ner:
+                is_entity = int(term in entity_words)
+            else:
+                is_entity = 0
+            tf = float(anserini.get_term_coll_freq(term)) / 689710000
             try:
-                idf = 1/self.get_term_doc_freq(term)
+                idf = 1/anserini.get_term_doc_freq(term)
             except:
                 idf = 0
             tf_in_q = term_doc_count_dict[term] / total_length

@@ -3,11 +3,9 @@ import argparse
 from datetime import datetime
 import glob
 import os
-import pickle
 from tqdm import tqdm
 
 from utils import Utils, bcolors, timing_decorator, calculate_mrr, get_white_listed_ids
-import anserini as anserini
 from CommandLineActions import CommandLineActions
 
 from experiments.automatic import AutomaticExperminet as AutomaticExp
@@ -83,25 +81,6 @@ class WebisCorpus:
                 break
         return modification_made
 
-    def categories(self):
-        category_ids = (396546048, 396546049, 396546050, 396546058, 396546061, 396546062, 396546088, 396545576, 396545581, 396545584, 396545591, 396545598, 396547134, 396546114, 396545607, 396545610, 396547158, 396545532, 396547166, 2115500137, 2115500139, 2115500141, 396545134, 396545136, 396545137, 396545138, 396545650, 396545653, 2115500152, 396545663, 396545664, 396545665, 2115500161, 396545160, 396545162, 396545163, 2115500179, 2115500180, 2115500182, 2115500183, 2115500184, 2115500185, 396545183, 396545187, 396545191, 2115500200, 2115500201, 2115500202, 2115500203, 396545196, 2115500204, 396545198, 2115500207, 2115500206, 2115500209, 2115500205, 2115500208, 396545211, 396545212, 396545214, 396545217, 396545219, 396545223, 396545231, 396545232, 396545233, 396545234, 396546301, 396545298, 396545299, 396545300, 396545302, 396545305, 396545307, 396545308, 396545310, 396545316, 396545320, 396545322, 396545324, 396546352, 396545342, 396545359, 396546385, 396545363, 396545364, 396545365, 396545366, 396545368, 396545372, 396545374, 396545377, 396545380, 396546406, 396545382, 396545383, 396546411, 396546415, 396545392, 396546419, 396545397, 396546945, 396546440, 396546444, 396545440, 396545441, 396545442, 396545447, 396545449, 396545453, 396546992, 396545457, 396545458, 396545462, 396545473, 396546501, 396546502, 396547017, 396545488, 396545489, 396545493, 396546519, 396545496, 396546218, 396545504, 396547043, 396546021, 396546035, 396546036, 396546037, 396546039, 396546041, 396546043, 396546044)
-        id_category_dict = {}
-        for id in category_ids:
-            id_category_dict[id] = {}
-        max_len = 0
-        id_doc_text = Utils.load_from_pickle('cleuweb-webis-id-doc-content-dict.p')
-
-        for item in tqdm(self.corpus_gen()):
-            # .push(item['Id'])
-            doc_vector = {}
-            for i in anserini.tokenizeString(id_doc_text[id], 'lucene'):
-                if i in doc_vector:
-                    doc_vector[i] += 1
-                else:
-                    doc_vector[i] = 1
-            id_category_dict[item['CategoryId']] = doc_vector
-        Utils.dump_to_pickle(id_category_dict, 'categories/id_category_dict.p')
-
     def write_corpus_to_file(self):
         with open(self.output_file_name, 'w') as outputCorpusFile:
             outputCorpusFile.write(json.dumps(self.data_list))
@@ -109,13 +88,12 @@ class WebisCorpus:
 
 def get_webis_docs():
     from pyserini import collection, index
-    gold_doc_dict = pickle.load(open('id-gold-doc-dict.p', 'rb'))
+    gold_doc_dict = Utils.load_from_pickle('id-gold-doc-dict.p')
     webis_docid_list = gold_doc_dict.values()
     webis_docid_list_first_second_names = [value.split('-')[1] + '-' + value.split('-')[2] for value in gold_doc_dict.values()]
     print(webis_docid_list_first_second_names)
-    # webis_docid_list_first_names = [value.split('-')[1] for value in gold_doc_dict.values()]
     webis_docid_document_content_dict = {}
-    paths_to_traverse = pickle.load(open('clueweb-paths-to-keep.p', 'rb'))
+    paths_to_traverse = Utils.load_from_pickle('clueweb-paths-to-keep.p')
 
     for path in tqdm(paths_to_traverse):
         c = collection.Collection('ClueWeb09Collection', '/GW/D5data/Clueweb09-english/'+path)
@@ -136,32 +114,35 @@ def get_webis_docs():
                         webis_docid_document_content_dict[docid] = parsed.get('contents')
                 except:
                     print('null')
-    pickle.dump(webis_docid_document_content_dict, open('cleuweb-webis-id-doc-content-dict' + '.p', "wb"))
-
+    Utils.dump_to_pickle(webis_docid_document_content_dict, 'cleuweb-webis-id-doc-content-dict' + '.p')
 
 
 def main(args):
     corpus = WebisCorpus(args)
     if args.experiment == 'classifier':
         train_samples = 1000
-        ClassifierExp(corpus, train_samples=train_samples, use_ner=(not args.no_ner))
+        ClassifierExp(corpus, train_samples=train_samples, use_ner=True)
+        ClassifierExp(corpus, train_samples=train_samples, use_ner=False)
+        ClassifierExp(corpus, train_samples=train_samples, use_noun=False)
+        ClassifierExp(corpus, train_samples=train_samples, use_verb=False)
+        ClassifierExp(corpus, train_samples=train_samples, use_adj=False)
         return
     if args.experiment == 'automatic':
         AutomaticExp('automatic', corpus)
         return
-    if args.experiment == "tf-idf-queries":
+    if args.experiment == "tf-idf":
         for k in range(5, 30, 5):
             TfIdfExp('tf-idf-'+str(k), corpus, k)
         return
-    if args.experiment == "tf-queries":
+    if args.experiment == "tf":
         for k in range(5, 30, 5):
             TfExp('tf-'+str(k), corpus, k)
         return
-    if args.experiment == "idf-queries":
+    if args.experiment == "idf":
         for k in range(5, 30, 5):
             IdfExp('idf-'+str(k), corpus, k)
         return
-    if args.experiment == "random-queries":
+    if args.experiment == "random":
         for k in range(5, 30, 5):
             RandomExp('idf-'+str(k), corpus, k)
         return
@@ -212,11 +193,6 @@ def main(args):
             for result_pickle in result_pickle_list:
                 f.write(','.join(calculate_mrr(result_pickle, get_white_listed_ids())) + '\n')
         return
-    if args.search:
-        print('search')
-        if args.resultpickle:
-            calculate_mrr(args.resultpickle)
-        return
     if corpus.get_user_modifications():
         corpus.write_corpus_to_file()
     print(corpus.get_completed_percentage())
@@ -242,12 +218,6 @@ if __name__ == "__main__":
     parser.add_argument('--showAnswer', '-sa', type=bool, nargs='?',  const=True, required=False,
                         default=False,
                         help='show the chosen answer for the question when prompting')
-    parser.add_argument('--search', '-se', type=bool, nargs='?', const=True, required=False,
-                        default=False,
-                        help='search corpus with specified queries')
-    parser.add_argument('--resultpickle', '-rpickle', type=str, required=False,
-                        default=False,
-                        help='result pickle file to calculate mrr for')
     parser.add_argument('--experiment', '-exp', type=str, required=False,
                         default=None,
                         help='specify experiment to run')

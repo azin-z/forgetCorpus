@@ -18,7 +18,9 @@ class Experiment:
             self.result_pickle_name += '-mini-index'
         self.result_pickle_name += '.p'
         self.white_list = get_white_listed_ids()
+        self.mrr = 0
         self.run()
+
 
     def dump_query_file(self, id_query_dict):
         Utils.dump_to_pickle(id_query_dict, self.query_pickle_name)
@@ -70,4 +72,5 @@ class Experiment:
     def run(self):
         self.build_queries()
         self.search_queries()
-        calculate_mrr(self.result_pickle_name, self.white_list)
+        _, mrr, _, _ = calculate_mrr(self.result_pickle_name, self.white_list)
+        self.mrr = float(mrr)

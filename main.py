@@ -5,11 +5,14 @@ import glob
 import os
 from tqdm import tqdm
 
-from utils import Utils, bcolors, timing_decorator, calculate_mrr, get_white_listed_ids
+from utils import Utils, bcolors, timing_decorator, calculate_mrr, get_white_listed_ids, length_stats_print
+import anserini
 from CommandLineActions import CommandLineActions
 
 from experiments.automatic import AutomaticExperminet as AutomaticExp
 from experiments.classifier import ClassifierExperminet as ClassifierExp
+from experiments.cnn import CNNExperminet as CNNExp
+
 from experiments.tfidf import TfIdfExperiment as TfIdfExp
 from experiments.tf import TfExperiment as TfExp
 from experiments.idf import IdfExperiment as IdfExp
@@ -65,6 +68,25 @@ class WebisCorpus:
                 continue
             yield item
 
+    def print_handwritten_stats(self):
+        min_len = 1000
+        max_len = 0
+        sum_len = 0
+        for item in self.corpus_gen_white_listed():
+            length = len(anserini.tokenizeString(item['Content'] + item['Subject'], 'lucene'))
+            max_len = max(max_len, length)
+            min_len = min(min_len, length)
+            sum_len += length
+        print('max q length: {}'.format(max_len))
+        print('min q length: {}'.format(min_len))
+        print('avg q length: {}'.format(sum_len / 476))
+
+    def corpus_gen_non_white_listed(self):
+        for i, item in enumerate(self.data_list):
+            if item['Id'] in self.white_list:
+                continue
+            yield item
+
     def get_completed_percentage(self):
         done_count = len(list(x for x in self.data_list if 'ForgetQuery' in x))
         total_count = len(self.data_list)
@@ -86,39 +108,20 @@ class WebisCorpus:
             outputCorpusFile.write(json.dumps(self.data_list))
 
 
-def get_webis_docs():
-    from pyserini import collection, index
-    gold_doc_dict = Utils.load_from_pickle('id-gold-doc-dict.p')
-    webis_docid_list = gold_doc_dict.values()
-    webis_docid_list_first_second_names = [value.split('-')[1] + '-' + value.split('-')[2] for value in gold_doc_dict.values()]
-    print(webis_docid_list_first_second_names)
-    webis_docid_document_content_dict = {}
-    paths_to_traverse = Utils.load_from_pickle('clueweb-paths-to-keep.p')
-
-    for path in tqdm(paths_to_traverse):
-        c = collection.Collection('ClueWeb09Collection', '/GW/D5data/Clueweb09-english/'+path)
-        generator = index.Generator('DefaultLuceneDocumentGenerator')
-        for (i, fs) in enumerate(c):
-            secondName = fs.segment_name.split('.')[0]  # this is the 03 thing
-            firstName = path.split('/')[1]  # this is the en000 thing
-            name = firstName + '-' + secondName
-            print(name)
-            if not name in webis_docid_list_first_second_names:
-                continue
-            print('iterating', firstName + '-' + secondName, 'segment')
-            for (j, doc) in tqdm(enumerate(fs)):
-                try:
-                    parsed = generator.create_document(doc)
-                    docid = parsed.get('id')  # FIELD_ID
-                    if docid in webis_docid_list:
-                        webis_docid_document_content_dict[docid] = parsed.get('contents')
-                except:
-                    print('null')
-    Utils.dump_to_pickle(webis_docid_document_content_dict, 'cleuweb-webis-id-doc-content-dict' + '.p')
-
-
 def main(args):
     corpus = WebisCorpus(args)
+
+    if args.experiment == "stats":
+        length_stats_print('queries-silver.p')
+        # length_stats_print('id-terms-in-common-no-stopwords-and-common-words-automatic-doc-lucene-dict.p')
+        # corpus.print_handwritten_stats()
+        return
+
+    if args.experiment == "cnn":
+        CNNExp(corpus, train_samples=100, use_ner=True)
+        return
+
+
     if args.experiment == 'classifier':
         train_samples = 1000
         ClassifierExp(corpus, train_samples=train_samples, use_ner=True)
@@ -126,7 +129,42 @@ def main(args):
         ClassifierExp(corpus, train_samples=train_samples, use_noun=False)
         ClassifierExp(corpus, train_samples=train_samples, use_verb=False)
         ClassifierExp(corpus, train_samples=train_samples, use_adj=False)
+        # ClassifierExp(corpus, train_samples=train_samples, use_ner=True)
         return
+
+    if args.experiment == 'classifier-no-context':
+        train_samples = 50
+        gain = 50
+        best = 0
+        while True:
+            exp = ClassifierExp(corpus, train_samples=train_samples, use_ner=True, useContext=False)
+            score = exp.mrr
+            if score > best:
+                best = score
+                train_samples += gain
+            else:
+                print('best score was: {} with {} train samples'.format(best, (train_samples-gain)))
+                return
+
+    if args.experiment == 'classifier-context':
+        expSmallTrain = ClassifierExp(corpus, train_samples=170, noQueryTerms=15, use_ner=True, useContext=True)
+        print('best score was: {} with {} train samples'.format(expSmallTrain.mrr, (170)))
+
+        # expTrainALl = ClassifierExp(corpus, train_samples=2000, noQueryTerms=15, use_ner=True, useContext=True)
+        # print('best score was: {} with {} train samples'.format(expTrainALl.mrr, (2000)))
+
+        # train_samples = 150
+        # best = 0
+        # gain = 10
+        # while True:
+        #     score = exp.mrr
+        #     if score > best:
+        #         best = score
+        #         train_samples += gain
+        #     else:
+        #         return
+        return
+
     if args.experiment == 'automatic':
         AutomaticExp('automatic', corpus)
         return
@@ -144,7 +182,7 @@ def main(args):
         return
     if args.experiment == "random":
         for k in range(5, 30, 5):
-            RandomExp('idf-'+str(k), corpus, k)
+            RandomExp('random-'+str(k), corpus, k)
         return
     if args.experiment == "handwritten":
         HandwrittenExp('handwritten', corpus)
@@ -158,36 +196,41 @@ def main(args):
     if args.experiment == 'silver':
         SilverExp(corpus)
         return
-    if args.experiment == 'make-experiment-sheet':
+    if args.produce_sheet:
         result_pickle_list = [
-                                'result-silver.p',
-                                'result-handwritten.p',
-                                'result-automatic.p',
-                                'result-named-entity-only.p',
-                                'result-tf-idf-25.p',
-                                'result-tf-idf-20.p',
-                                'result-tf-idf-15.p',
-                                'result-tf-idf-10.p',
-                                'result-tf-idf-5.p',
-                                'result-tf-25.p',
-                                'result-tf-20.p',
-                                'result-tf-15.p',
-                                'result-tf-10.p',
-                                'result-tf-5.p',
-                                'result-idf-25.p',
-                                'result-idf-20.p',
-                                'result-idf-15.p',
-                                'result-idf-10.p',
-                                'result-idf-5.p',
-                                'result-random-25.p',
-                                'result-random-20.p',
-                                'result-random-15.p',
-                                'result-random-10.p',
-                                'result-random-5.p',
-                                'azzopardi/result-model-1.p',
-                                'azzopardi/result-model-2.p',
-                                'azzopardi/result-model-3.p',
-                                'azzopardi/result-model-4.p'
+                                'result-clf-model-neruse-handwritten-as-goldTrueTrue-nounTrue-verbTrue-adjTrue-476.p'
+                                # 'result-clf-model-nerTrue-nounFalse-verbTrue-adjTrue-1000.p.p',
+                                # 'result-clf-model-nerFalse-nounTrue-verbTrue-adjTrue-1000.p.p',
+                                # 'result-clf-model-nerTrue-nounTrue-verbFalse-adjTrue-1000.p.p',
+                                # 'result-clf-model-nerTrue-nounTrue-verbTrue-adjFalse-1000.p.p',
+                                # 'result-silver.p',
+                                # 'result-handwritten.p',
+                                # 'result-automatic.p',
+                                # 'result-named-entity-only.p',
+                                # 'result-tf-idf-25.p',
+                                # 'result-tf-idf-20.p',
+                                # 'result-tf-idf-15.p',
+                                # 'result-tf-idf-10.p',
+                                # 'result-tf-idf-5.p',
+                                # 'result-tf-25.p',
+                                # 'result-tf-20.p',
+                                # 'result-tf-15.p',
+                                # 'result-tf-10.p',
+                                # 'result-tf-5.p',
+                                # 'result-idf-25.p',
+                                # 'result-idf-20.p',
+                                # 'result-idf-15.p',
+                                # 'result-idf-10.p',
+                                # 'result-idf-5.p',
+                                # 'result-random-25.p',
+                                # 'result-random-20.p',
+                                # 'result-random-15.p',
+                                # 'result-random-10.p',
+                                # 'result-random-5.p',
+                                # 'azzopardi/result-model-1.p',
+                                # 'azzopardi/result-model-2.p',
+                                # 'azzopardi/result-model-3.p',
+                                # 'azzopardi/result-model-4.p'
                               ]
         with open('output_experiments.txt', 'w') as f:
             for result_pickle in result_pickle_list:
@@ -221,10 +264,37 @@ if __name__ == "__main__":
     parser.add_argument('--experiment', '-exp', type=str, required=False,
                         default=None,
                         help='specify experiment to run')
-    parser.add_argument('--index', '-ind', type=str, required=False,
-                        default='full',
-                        help='specify index to use, mini(only webis docs) or full(all of clueweb09) ')
-    parser.add_argument('--no_ner', '-no_ner', type=bool, required=False, nargs='?', const=True,
-                        default=False,
-                        help='use named entities for classifier')
+    parser.add_argument('--produce_sheet', '-sheet', action='store_true',
+                        help='specify experiment to run')
     main(parser.parse_args())
+
+
+def get_webis_docs():
+    from pyserini import collection, index
+    gold_doc_dict = Utils.load_from_pickle('id-gold-doc-dict.p')
+    webis_docid_list = gold_doc_dict.values()
+    webis_docid_list_first_second_names = [value.split('-')[1] + '-' + value.split('-')[2] for value in gold_doc_dict.values()]
+    print(webis_docid_list_first_second_names)
+    webis_docid_document_content_dict = {}
+    paths_to_traverse = Utils.load_from_pickle('clueweb-paths-to-keep.p')
+
+    for path in tqdm(paths_to_traverse):
+        c = collection.Collection('ClueWeb09Collection', '/GW/D5data/Clueweb09-english/'+path)
+        generator = index.Generator('DefaultLuceneDocumentGenerator')
+        for (i, fs) in enumerate(c):
+            secondName = fs.segment_name.split('.')[0]  # this is the 03 thing
+            firstName = path.split('/')[1]  # this is the en000 thing
+            name = firstName + '-' + secondName
+            print(name)
+            if not name in webis_docid_list_first_second_names:
+                continue
+            print('iterating', firstName + '-' + secondName, 'segment')
+            for (j, doc) in tqdm(enumerate(fs)):
+                try:
+                    parsed = generator.create_document(doc)
+                    docid = parsed.get('id')  # FIELD_ID
+                    if docid in webis_docid_list:
+                        webis_docid_document_content_dict[docid] = parsed.get('contents')
+                except:
+                    print('null')
+    Utils.dump_to_pickle(webis_docid_document_content_dict, 'cleuweb-webis-id-doc-content-dict' + '.p')

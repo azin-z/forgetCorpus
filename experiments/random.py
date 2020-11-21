@@ -11,7 +11,10 @@ class RandomExperiment(Experiment):
     def select_random_words(self, text):
         """selecting top words"""
         terms = list(set(anserini.tokenizeString(text, 'lucene')))
-        return ' '.join(random.sample(terms, self.k))
+        k = self.k
+        if len(terms) <= k:
+            k = len(terms)
+        return ' '.join(random.sample(terms, k))
 
     def get_query_per_item(self, item):
         return self.select_random_words(item['Subject'] + item['Content'])

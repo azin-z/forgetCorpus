@@ -8,7 +8,9 @@ def get_entities(text):
     entity_words = set()
     for ent in doc_text.ents:
         for word in anserini.tokenizeString(ent.text):
-            if not ent.label_ == 'CARDINAL' and not ent.label_ == 'DATE':
+            if not ent.label_ == 'CARDINAL' and not ent.label_ == 'DATE': \
+                    # and not ent.label_ == 'PERCENT' \
+                    # and not ent.label_ == 'QUANTITY'
                 entity_words.add(word)
                 # print(ent.text, ent.start_char, ent.end_char, ent.label_)
     return entity_words

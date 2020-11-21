@@ -1,6 +1,8 @@
 import pickle
 import functools
 import time
+import anserini as anserini
+import json
 
 
 class Utils:
@@ -34,6 +36,33 @@ def timing_decorator(func):
         return output
     return wrapper
 
+def get_item(id):
+    with open('corpus/edited-at-2020-06-29_18:27:09.json') as corpusFile:
+        data_list = json.loads(corpusFile.read())
+        for item in data_list:
+            if item['Id'] == id:
+                return item
+
+
+def length_stats_print(saved_pickle='queries-handwritten.p'):
+    query_dict = Utils.load_from_pickle(saved_pickle)
+    min_len = 1000
+    max_len = 0
+    sum_len = 0
+
+    for key, value in query_dict.items():
+        item = get_item(key)
+        print(item['Subject'])
+        print(item['Content'])
+        print("silver query", value)
+        length = len(anserini.tokenizeString(value, 'lucene'))
+        max_len = max(max_len, length)
+        min_len = min(min_len, length)
+        sum_len += length
+    print('max length: {}'.format(max_len))
+    print('min length: {}'.format(min_len))
+    print('avg length: {}'.format(sum_len/len(query_dict.values())))
+
 
 def get_white_listed_ids():  # not pc
     white_listed_ids = set()
@@ -51,6 +80,7 @@ def is_clueweb_id(name):
 
 
 def get_webis_id(clueweb_id):
+
     return Utils.load_from_pickle('clueweb_webis_map.p')[clueweb_id]
 
 

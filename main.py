@@ -21,6 +21,7 @@ from experiments.handwritten import HandwrittenExperiment as HandwrittenExp
 from experiments.named_entity import NamedEntityExperiment as NamedEntityExp
 from experiments.azzopardi import AzzopardiExperiment as AzzopardiExp
 from experiments.silver import SilverExperminet as SilverExp
+from experiments.mostcommonterms import MostCommonTermsExperiment as MostCommonTermsExp
 
 
 class WebisCorpus:
@@ -117,18 +118,42 @@ def main(args):
         # corpus.print_handwritten_stats()
         return
 
+    if args.experiment == "rm3":
+        HandwrittenExp('handwritten-mini-YesRm3' + str(5) + '-' + str(5) + '-' + str(7 / 10), corpus, rm3=True,
+                  mini_index=True, rm3Terms=5, rm3Docs=5, rm3OrigWeight=(7 / 10))
+
+        # for q in range(5, 15, 5):
+        #     for d in range(5, 15, 5):
+        #         for w in range(5, 10, 2):
+        #             HandwrittenExp('handwritten-mini-YesRm3-' + str(q) + '-' + str(d) + '-' + str(w/10), corpus, rm3=True, mini_index=True, rm3Terms=q, rm3Docs=d, rm3OrigWeight=(w/10))
+        # HandwrittenExp('handwritten-mini-NoRm3', corpus, rm3=False, mini_index=True)
+        # SilverExp(corpus, name="silver-mini-YesRm3", rm3=True, mini_index=True)
+        # SilverExp(corpus, name="silver-mini-YesRm3-" + str(5) + '-' + str(5) + '-' + str(7 / 10), rm3=True,
+        #           mini_index=True, rm3Terms=5, rm3Docs=5, rm3OrigWeight=(7 / 10))
+
+        # for q in range(5, 15, 5):
+        #     for d in range(5, 15, 5):
+        #         for w in range(5, 10, 2):
+        #             SilverExp(corpus, name="silver-mini-YesRm3-" + str(q) + '-' + str(d) + '-' + str(w/10), rm3=True, mini_index=True,  rm3Terms=q, rm3Docs=d, rm3OrigWeight=(w/10))
+
+        # SilverExp(corpus, name="silver-mini-NoRm3", rm3=False, mini_index=True)
+        return
+
     if args.experiment == "cnn":
         CNNExp(corpus, train_samples=100, use_ner=True)
         return
-
+    if args.experiment == "no-stop-words":
+        MostCommonTermsExp("without-common-dict", corpus)
+        return
 
     if args.experiment == 'classifier':
-        train_samples = 1000
-        ClassifierExp(corpus, train_samples=train_samples, use_ner=True)
-        ClassifierExp(corpus, train_samples=train_samples, use_ner=False)
-        ClassifierExp(corpus, train_samples=train_samples, use_noun=False)
-        ClassifierExp(corpus, train_samples=train_samples, use_verb=False)
-        ClassifierExp(corpus, train_samples=train_samples, use_adj=False)
+        train_samples = 300
+        ClassifierExp(corpus, train_samples=train_samples, use_ner=True, useContext=False)
+        ClassifierExp(corpus, train_samples=train_samples, use_ner=True, useContext=True)
+        ClassifierExp(corpus, train_samples=train_samples, use_ner=False, useContext=True)
+        ClassifierExp(corpus, train_samples=train_samples, use_noun=False, useContext=True)
+        ClassifierExp(corpus, train_samples=train_samples, use_verb=False, useContext=True)
+        ClassifierExp(corpus, train_samples=train_samples, use_adj=False, useContext=True)
         # ClassifierExp(corpus, train_samples=train_samples, use_ner=True)
         return
 
@@ -147,7 +172,7 @@ def main(args):
                 return
 
     if args.experiment == 'classifier-context':
-        expSmallTrain = ClassifierExp(corpus, train_samples=170, noQueryTerms=15, use_ner=True, useContext=True)
+        expSmallTrain = ClassifierExp(corpus, train_samples=400, noQueryTerms=15, use_ner=True, useContext=True)
         print('best score was: {} with {} train samples'.format(expSmallTrain.mrr, (170)))
 
         # expTrainALl = ClassifierExp(corpus, train_samples=2000, noQueryTerms=15, use_ner=True, useContext=True)

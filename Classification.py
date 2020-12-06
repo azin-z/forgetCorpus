@@ -2,6 +2,7 @@ import anserini as anserini
 from utils import Utils, timing_decorator
 import POS as pos
 import NER as ner
+from sklearn.model_selection import train_test_split
 
 import numpy as np
 
@@ -23,7 +24,10 @@ class Classification:
     @timing_decorator
     def train(self):
         """training classifier with given examples"""
+        # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20)
+
         self.clf.fit(self.X, self.y)
+
         self.flush()
 
     def flush(self):
@@ -42,23 +46,26 @@ class Classification:
     def load_model(self, name):
         self.clf = Utils.load_from_pickle('classifiermodels/' + name)
 
-    def getAccuracy(self, result):
-        totalTrue = 0
-        totalNotTrue = 0
-        correctlyPredictedTrue = 0
-        correctlyPredictedNotTrue = 0
-        for i in range(len(result)):
-            if self.y[i] == 1:
-                totalTrue += 1
-                if result[i] == 1:
-                    correctlyPredictedTrue += 1
-            if self.y[i] == 0:
-                totalNotTrue += 1
-                if self.y[i] == 0:
-                    correctlyPredictedNotTrue += 1
-        print(len(result))
-        print('recall:', correctlyPredictedTrue/totalTrue)
-        print('precision:', correctlyPredictedTrue/np.count_nonzero(result == 1))
+    # def getAccuracy(self):
+    #     self.clf.fit(self.X, self.y)
+    #     result = self.clf.score(self.X, self.y)
+    #     return result
+        # totalTrue = 0
+        # totalNotTrue = 0
+        # correctlyPredictedTrue = 0
+        # correctlyPredictedNotTrue = 0
+        # for i in range(len(result)):
+        #     if self.y[i] == 1:
+        #         totalTrue += 1
+        #         if result[i] == 1:
+        #             correctlyPredictedTrue += 1
+        #     if self.y[i] == 0:
+        #         totalNotTrue += 1
+        #         if self.y[i] == 0:
+        #             correctlyPredictedNotTrue += 1
+        # print(len(result))
+        # print('recall:', correctlyPredictedTrue/totalTrue)
+        # print('precision:', correctlyPredictedTrue/np.count_nonzero(result == 1))
 
     def add_sample(self, is_in_doc, features):
         self.X.append(features)
@@ -80,7 +87,10 @@ class Classification:
         else:
             is_adj = 0
         if self.use_ner:
-            is_entity = int(term in entity_words)
+            if term in entity_words:
+                is_entity = 1
+            else:
+                is_entity = 0
         else:
             is_entity = 0
         tf = float(anserini.get_term_coll_freq(term)) / 689710000
@@ -88,6 +98,9 @@ class Classification:
             idf = 1 / anserini.get_term_doc_freq(term)
         except:
             idf = 0
+        if term in anserini.stopwords_temp:
+            idf = 0
+            tf = 689710000
         tf_in_q = term_doc_count_dict[term] / total_length
         rel_pos = float(i) / total_length
         return [tf, idf, tf_in_q, rel_pos, is_in_subject, is_in_content, is_noun, is_verb, is_adj, is_entity]
@@ -98,10 +111,10 @@ class Classification:
         if self.use_ner:
             entity_words = ner.get_entities(text)
         size = 10
-        prev_prev_features = [0] * size
+        # prev_prev_features = [0] * size
         prev_features = [0] * size
         next_features = [0] * size
-        nex_next_features = [0] * size
+        # nex_next_features = [0] * size
         for i, (term, pos_tag) in enumerate(zip(terms, pos_tags)):
             features = self.process_word(i, term, block_type, pos_tag, entity_words, term_doc_count_dict, total_length)
             # if i > 1:
@@ -113,7 +126,7 @@ class Classification:
             # if i < len(terms) - 2:
             #     nex_next_features = self.process_word(i+2, terms[i+2], block_type, pos_tags[i+2], entity_words, term_doc_count_dict, total_length)
             if self.useContext:
-                features = prev_prev_features + prev_features + features + next_features + nex_next_features
+                features =  prev_features + features + next_features
             is_in_doc = int(term in anserini.tokenizeString(silver_query, 'lucene'))
             self.add_sample(is_in_doc, features)
 

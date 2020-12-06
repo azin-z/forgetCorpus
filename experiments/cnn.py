@@ -106,7 +106,10 @@ class CNNExperminet(Experiment):
         else:
             is_adj = 0
         if self.use_ner:
-            is_entity = int(term in entity_words)
+            if term in entity_words:
+                is_entity = entity_words[term]
+            else:
+                is_entity = 0
         else:
             is_entity = 0
         tf = float(anserini.get_term_coll_freq(term)) / 689710000
@@ -269,13 +272,13 @@ class CNNExperminet(Experiment):
         # criterion = nn.CrossEntropyLoss()
         criterion = nn.MSELoss()
         optimizer = optim.Adam(self.net.parameters(), lr=lr)
-        try:
-            train_data = Utils.load_from_pickle('cnn-batch-train_data.p')
-            valid_data = Utils.load_from_pickle('cnn-batch-val_data.p')
-        except:
-            train_data, valid_data = self.get_all_data_in_batches()
-            Utils.dump_to_pickle(train_data, 'cnn-batch-train_data.p')
-            Utils.dump_to_pickle(valid_data, 'cnn-batch-val_data.p')
+        # try:
+        #     train_data = Utils.load_from_pickle('cnn-batch-train_data.p')
+        #     valid_data = Utils.load_from_pickle('cnn-batch-val_data.p')
+        # except:
+        train_data, valid_data = self.get_all_data_in_batches()
+        Utils.dump_to_pickle(train_data, 'cnn-batch-train_data.p')
+        Utils.dump_to_pickle(valid_data, 'cnn-batch-val_data.p')
         # assert train_data_p == train_data
         # assert valid_data == valid_data_p
 

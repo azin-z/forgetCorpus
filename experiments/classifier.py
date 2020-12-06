@@ -1,7 +1,7 @@
 from . import Experiment
 from utils import Utils, timing_decorator, calculate_mrr, get_white_listed_ids
 from Classification import Classification
-
+import anserini as anserini
 
 class ClassifierExperminet(Experiment):
 
@@ -19,12 +19,14 @@ class ClassifierExperminet(Experiment):
         if useHandwrittenAsGold:
             self.training_item_generator_func = webiscorpus.corpus_gen_white_listed
             self.silver_dict = Utils.load_from_pickle('queries-handwritten.p')
-        super(ClassifierExperminet, self).__init__(self.model_name, webiscorpus)
+        super(ClassifierExperminet, self).__init__(self.model_name, webiscorpus, mini_index=False)
 
     @timing_decorator
     def train_model(self):
         """training classifier"""
         for i, item in enumerate(self.training_item_generator_func()):
+            # if i > 0 and i % 100 == 0:
+            #     print("accuracy at {} is {}".format(i, self.classification.getAccuracy()))
             if i > self.train_samples:
                 break
             self.classification.process_query(item['Subject'], item['Content'], self.silver_dict[item['Id']])
@@ -43,9 +45,9 @@ class ClassifierExperminet(Experiment):
             full_terms.pop(picked_word_index)
             if picked_word not in query_terms:
                 query_terms.append(picked_word)
-        query_terms = ' '.join(set(query_terms))
-        print('classifier:', query_terms)
-        print('silver:', self.silver_dict[item['Id']])
+        query_terms = ' '.join(set([term for term in query_terms if term not in anserini.stopwords_temp]))
+        # print('classifier:', query_terms)
+        # print('silver:', self.silver_dict[item['Id']])
         return query_terms
 
     def run(self):

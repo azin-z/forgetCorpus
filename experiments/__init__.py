@@ -4,8 +4,11 @@ import anserini as anserini
 
 
 class Experiment:
-    def __init__(self, name, webiscorpus, rm3=False, mini_index=False):
+    def __init__(self, name, webiscorpus, rm3=False, mini_index=False, rm3Terms=10, rm3Docs=10 , rm3OrigWeight=0.9):
         self.rm3 = rm3
+        self.rm3Terms = rm3Terms
+        self.rm3Docs = rm3Docs
+        self.rm3OrigWeight = rm3OrigWeight
         self.mini_index = mini_index
         self.name = name
         self.webiscorpus = webiscorpus
@@ -48,11 +51,12 @@ class Experiment:
             jqueries.add(query)
         for i, id in enumerate(list(queries.keys())):
             ids.add(id)
-        if self.rm3:
-            anserini.searcher.setRM3Reranker()
+
         searcher = anserini.searcher
         if self.mini_index:
             searcher = anserini.minisearcher
+        if self.rm3:
+            searcher.setRM3Reranker(self.rm3Terms, self.rm3Docs, self.rm3OrigWeight, True)
         results = searcher.batchSearch(jqueries, ids, 500, 40)
         results_key_set = results.keySet().toArray()
         for resultKey in results_key_set:
